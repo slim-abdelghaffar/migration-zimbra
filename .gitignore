@@ -1,0 +1,19 @@
+# Environnement et artefacts
+.venv/
+__pycache__/
+*.pyc
+tools/build/
+dist/
+wheels/
+tmp/
+
+# Données client : jamais dans Git
+data/
+logs/
+work/
+pst/
+migration.env
+app/static/brand/logo.*
+
+# Bibliothèque téléchargée par install.sh (incluse dans le paquet hors-ligne)
+vendor/*.jar

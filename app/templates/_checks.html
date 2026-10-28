@@ -1,0 +1,15 @@
+{% from "_icons.html" import icon %}
+<div class="checks">
+{% for r in rows %}
+  {% set t = {'OK': 'ok', 'KO': 'ko', 'AVERT': 'warn'}.get(r.status, '') %}
+  <div class="check {{ t }}">
+    <span class="check-icon">{{ icon({'ok': 'check', 'ko': 'x', 'warn': 'alert'}.get(t, 'info')) }}</span>
+    <div class="check-body">
+      <div class="check-title"><span>{{ r.label }}</span>
+        <span class="badge {{ 'badge-' ~ t if t }}">{{ {'OK': 'Réussi', 'KO': 'Échec', 'AVERT': 'Attention'}.get(r.status, 'Non testé') }}</span></div>
+      <div class="check-detail mono">{{ r.detail }}</div>
+      {% if r.lines %}<ul>{% for l in r.lines %}<li>{{ l }}</li>{% endfor %}</ul>{% endif %}
+    </div>
+  </div>
+{% endfor %}
+</div>

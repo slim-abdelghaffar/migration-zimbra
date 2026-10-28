@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page_title = "Connectivité" %}
+{% set page_sub = "Contrôle réseau, TLS et authentification avant toute migration" %}
+{% block actions %}
+  <form method="post"><button class="btn btn-accent" type="submit">{{ icon('refresh', 16) }} Lancer les tests</button></form>
+{% endblock %}
+{% block content %}
+<div class="grid-2">
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('server') }} Serveurs Zimbra</div></div>
+    <dl class="kv">
+      <dt>Admin SOAP</dt><dd>{{ settings.admin_url }}</dd>
+      <dt>Utilisateur</dt><dd>{{ settings.user_url }}</dd>
+      <dt>Autorité TLS</dt><dd>{{ settings.ca_file or 'Magasin système Ubuntu' }}</dd>
+      <dt>Compte admin</dt><dd>{{ settings.admin_user or '— (à saisir dans Configuration)' }}</dd>
+    </dl>
+  </section>
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('shield') }} Ce qui est vérifié</div></div>
+    <div class="prose"><ul>
+      <li>Résolution DNS des deux noms d'hôte</li>
+      <li>Ouverture TCP : 7071 (administration) et 443 (proxy utilisateur)</li>
+      <li>Certificat TLS : chaîne, nom, émetteur et date d'expiration</li>
+      <li>Authentification admin (AuthRequest) — le jeton n'est jamais affiché</li>
+    </ul></div>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head"><div><div class="card-title">{{ icon('activity') }} Résultats</div>
+    <div class="card-sub">Statut et message d'erreur exact pour chaque contrôle</div></div></div>
+  {% if results %}
+    {% with rows = results %}{% include "_checks.html" %}{% endwith %}
+  {% else %}
+    <div class="empty">{{ icon('plug', 30) }}<div>Cliquez sur « Lancer les tests » pour vérifier la connexion aux serveurs.</div></div>
+  {% endif %}
+</section>
+{% endblock %}

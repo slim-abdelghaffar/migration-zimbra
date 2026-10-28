@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page_title = "Fonctionnement" %}
+{% set page_sub = "Principe de la plateforme : identification, jeton délégué, extraction et import" %}
+{% block content %}
+
+<section class="card">
+  <div class="card-head"><div><div class="card-title">{{ icon('server') }} Architecture</div>
+    <div class="card-sub">Trois acteurs, deux canaux vers Zimbra, aucun mot de passe utilisateur</div></div></div>
+  <div class="archi">
+    <div class="archi-box">
+      <h3>{{ icon('archive') }} Fichiers PST</h3>
+      <ul><li>Un fichier par boîte : <code>prenom.nom@domaine.pst</code></li>
+        <li>Exports Outlook : mails, calendrier, contacts, tâches</li>
+        <li>Ouverts en <b>lecture seule</b>, jamais modifiés</li></ul>
+    </div>
+    <div class="archi-arrow">{{ icon('arrow-right', 28) }}</div>
+    <div class="archi-box core">
+      <h3>{{ icon('logo') }} {{ brand.company }} {{ brand.product }}</h3>
+      <ul><li>Interface web et moteur de migration (Python)</li>
+        <li>Extracteur java-libpst</li>
+        <li>Conversion MIME / iCalendar / vCard</li>
+        <li>Base d'état SQLite : inventaire, lots, éléments importés</li></ul>
+    </div>
+    <div class="archi-arrow">{{ icon('arrow-right', 28) }}</div>
+    <div class="archi-box">
+      <h3>{{ icon('server') }} Zimbra 10.1</h3>
+      <ul><li><b>Admin SOAP :7071</b> : jetons (AuthRequest, DelegateAuthRequest, GetAccountRequest)</li>
+        <li><b>Proxy :443</b> : import dans les boîtes (SOAP, upload, REST)</li></ul>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head"><div class="card-title">{{ icon('activity') }} Les 6 étapes pour chaque compte</div></div>
+  <div class="flow">
+    <div class="flow-step"><h3>{{ icon('key', 16) }} Jeton délégué</h3><p>L'admin obtient un jeton valable uniquement pour cette boîte.</p></div>
+    <div class="flow-step"><h3>{{ icon('shield', 16) }} Concordance</h3><p>Le compte ouvert par le jeton doit être celui du nom du PST. Sinon, le compte est bloqué.</p></div>
+    <div class="flow-step"><h3>{{ icon('file', 16) }} Extraction</h3><p>java-libpst lit le PST en lecture seule dans un dossier de travail temporaire.</p></div>
+    <div class="flow-step"><h3>{{ icon('gauge', 16) }} Analyse</h3><p>Détection des types présents, dossiers, doublons, période (delta).</p></div>
+    <div class="flow-step"><h3>{{ icon('send', 16) }} Import</h3><p>Dossiers recréés, puis mails, rendez-vous, contacts et tâches.</p></div>
+    <div class="flow-step"><h3>{{ icon('check', 16) }} Vérification</h3><p>Comptage dans Zimbra, rapport, suppression des fichiers temporaires.</p></div>
+  </div>
+</section>
+
+<div class="grid-2">
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('archive') }} 1. Comment un PST est associé à un compte</div></div>
+    <div class="prose">
+      <p>Avec les identifiants admin, la plateforme récupère <b>tout l'annuaire Zimbra</b> (SearchDirectoryRequest),
+         puis parcourt le dossier PST et ses sous-dossiers. Pour chaque fichier, elle cherche le propriétaire :</p>
+      <ul>
+        <li><b>Adresse exacte</b> dans le nom du fichier ou d'un dossier parent
+            (<code>ali.bensalah@courdescomptes.nat.tn.pst</code>, <code>ali.bensalah@…/Outlook.pst</code>) :
+            attribution <b>automatique</b> ;</li>
+        <li><b>Nom correspondant</b>, dans n'importe quel ordre et sans tenir compte des accents ni des mots parasites
+            (archive, backup, années…) : <code>benabdelghaffar.slim</code>, <code>BEN ABDELGHAFFAR Slim (archive 2023)</code>,
+            initiale + nom (<code>s.benabdelghaffar</code>), identifiant Windows/AD (<code>Users/sbenabdelghaffar/Outlook.pst</code>),
+            nom de famille seul s'il est unique, petite faute de frappe ;</li>
+        <li><b>Contenu</b> : java-libpst lit l'expéditeur des Éléments envoyés, le destinataire des mails reçus et le nom interne du PST.</li>
+        <li><b>Nom et contenu concordants</b> : deux preuves indépendantes, attribution <b>automatique</b>.
+            Deux homonymes possibles ou un contenu qui contredit le nom : la plateforme ne tranche pas et demande validation.</li>
+      </ul>
+      <div class="callout">Les attributions par nom ou par contenu sont <b>proposées</b> et doivent être validées
+        (une par une ou en un clic) : la plateforme n'écrit jamais dans une boîte sans attribution exacte ou validée.
+        Si le contenu d'un PST semble appartenir à quelqu'un d'autre, un avertissement est affiché.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('key') }} 2. Le jeton délégué : accès sans mot de passe utilisateur</div></div>
+    <div class="prose">
+      <p>Les comptes sont authentifiés par l'Active Directory : la plateforme ne connaît <b>aucun mot de passe utilisateur</b>.
+         Elle utilise la délégation d'administration de Zimbra :</p>
+    </div>
+    <div class="code-flow"><span class="c"># 1. Connexion admin (port 7071) — mot de passe gardé en mémoire uniquement</span>
+<span class="k">AuthRequest</span>(admin, ••••••)          → jeton <b>admin</b>
+
+<span class="c"># 2. L'admin demande un jeton pour UNE boîte précise</span>
+<span class="k">DelegateAuthRequest</span>(ali.bensalah@…)  → jeton <b>délégué</b> (6 h)
+
+<span class="c"># 3. Avec ce jeton, on demande à Zimbra : « qui suis-je ? » (port 443)</span>
+<span class="k">GetInfoRequest</span>                      → name = ali.bensalah@…
+    </div>
+    <div class="prose" style="margin-top:12px">
+      <p>Le jeton délégué n'ouvre <b>que</b> la boîte demandée. Il est neuf pour chaque compte, renouvelé
+         automatiquement s'il expire, et n'est jamais affiché ni enregistré.</p>
+    </div>
+  </section>
+</div>
+
+<div class="grid-2">
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('shield') }} 3. La concordance : le verrou de sécurité</div></div>
+    <div class="prose">
+      <p>Avant toute écriture, la plateforme compare deux informations indépendantes :</p>
+    </div>
+    <div class="code-flow">nom du fichier PST        ali.bensalah@courdescomptes.nat.tn
+compte renvoyé par Zimbra ali.bensalah@courdescomptes.nat.tn
+                          <span class="ok">✓ identiques → import autorisé</span>
+
+nom du fichier PST        autre.compte@courdescomptes.nat.tn
+compte renvoyé par Zimbra quelquun@courdescomptes.nat.tn
+                          <span class="ko">✗ différents → compte « bloqué », rien n'est extrait ni écrit</span>
+    </div>
+    <div class="prose" style="margin-top:12px">
+      <p>Cela garantit qu'un PST ne peut jamais être importé dans la boîte d'une autre personne,
+         même en cas d'erreur de nommage ou de configuration. C'est le <b>seul</b> motif de blocage :
+         le contenu du PST, lui, ne bloque jamais la migration.</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('file') }} 4. L'extraction du PST (java-libpst)</div></div>
+    <div class="prose">
+      <p>Le format PST est un format binaire Microsoft. La plateforme utilise <b>java-libpst</b>, une bibliothèque
+         open source qui lit directement les propriétés MAPI du fichier, en lecture seule :</p>
+      <ul>
+        <li><b>Mails</b> : en-têtes d'origine, corps texte et HTML, pièces jointes, messages joints, Message-ID,
+            dates, lu / non lu, indicateur, répondu / transféré, adresse SMTP réelle de l'expéditeur ;</li>
+        <li><b>Calendrier</b> : rendez-vous, récurrences (quotidienne, hebdomadaire, mensuelle, annuelle),
+            occurrences supprimées ou déplacées, participants, fuseaux horaires, rappels ;</li>
+        <li><b>Contacts</b> : noms, emails, téléphones, adresses, société, anniversaire, notes ;</li>
+        <li><b>Tâches</b> : échéance, avancement, priorité, statut.</li>
+      </ul>
+      <p>Les données sont écrites dans <code>work/</code>, puis <b>supprimées</b> dès que le compte est terminé.
+         Les types absents (pas de calendrier, pas de contacts…) sont simplement signalés « absent ».</p>
+    </div>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head"><div class="card-title">{{ icon('send') }} 5. L'import dans Zimbra</div></div>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>Type</th><th>Conversion</th><th>Méthode Zimbra</th><th>Ce qui est conservé</th></tr></thead>
+    <tbody>
+      <tr><td class="cell-main">{{ icon('archive', 15) }} Dossiers</td><td>Arborescence Outlook → Zimbra</td>
+        <td><code>CreateFolderRequest</code></td><td>Boîte de réception → Inbox, Éléments envoyés → Sent, sous-dossiers recréés</td></tr>
+      <tr><td class="cell-main">{{ icon('mail', 15) }} Mails</td><td>Message RFC 822 (MIME)</td>
+        <td><code>/service/upload</code> + <code>AddMsgRequest</code></td><td>Date d'origine, lu / non lu, indicateur, pièces jointes, images</td></tr>
+      <tr><td class="cell-main">{{ icon('calendar', 15) }} Calendrier</td><td>iCalendar (.ics)</td>
+        <td>REST <code>/home/&lt;email&gt;/Calendar?fmt=ics</code></td><td>Récurrences, exceptions, participants, fuseaux, rappels</td></tr>
+      <tr><td class="cell-main">{{ icon('contact', 15) }} Contacts</td><td>vCard 3.0 (.vcf)</td>
+        <td>REST <code>/home/&lt;email&gt;/Contacts?fmt=vcf</code></td><td>Noms, emails, téléphones, adresses, société</td></tr>
+      <tr><td class="cell-main">{{ icon('task', 15) }} Tâches</td><td>iCalendar VTODO</td>
+        <td>REST <code>/home/&lt;email&gt;/Tasks?fmt=ics</code></td><td>Échéance, avancement, priorité</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<div class="grid-2">
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('refresh') }} 6. Fiabilité</div></div>
+    <div class="prose"><ul>
+      <li><b>Simulation</b> : tout le traitement sauf l'écriture, pour valider avant d'importer.</li>
+      <li><b>Idempotence</b> : chaque élément importé est mémorisé (Message-ID pour les mails). Une relance n'importe que ce qui manque, sans doublon.</li>
+      <li><b>Reprise</b> : un lot arrêté ou interrompu (coupure, redémarrage) reprend là où il s'était arrêté.</li>
+      <li><b>Mode delta</b> : n'importer que les mails postérieurs à une date (migration en deux temps).</li>
+      <li><b>Tolérance</b> : un élément illisible est compté en erreur et journalisé, le compte continue.</li>
+      <li><b>Parallélisme</b> : jusqu'à 5 comptes traités simultanément.</li>
+    </ul></div>
+  </section>
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('lock') }} 7. Sécurité</div></div>
+    <div class="prose"><ul>
+      <li>Aucun mot de passe utilisateur : délégation d'administration uniquement.</li>
+      <li>Mot de passe admin en mémoire seulement, jamais sur disque ni dans les journaux ; jetons jamais affichés.</li>
+      <li>Écriture limitée aux comptes « prêts » de l'inventaire, après concordance.</li>
+      <li>Import réel derrière une double confirmation explicite.</li>
+      <li>Vérification TLS toujours active (certificat <code>*.courdescomptes.nat.tn</code>).</li>
+      <li>Interface accessible uniquement en local, protégée contre les requêtes d'autres sites.</li>
+      <li>PST en lecture seule, fichiers temporaires supprimés après chaque compte.</li>
+    </ul></div>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon, status_badge %}
+{% set page_title = acc.display_name or acc.email %}
+{% set page_sub = acc.email ~ " · état réel de la boîte, lu en direct dans Zimbra via le compte admin (lecture seule)" %}
+{% block actions %}
+  <span class="badge badge-run" id="live">En direct</span>
+  <button class="btn btn-ghost" id="refresh" type="button">{{ icon('refresh', 15) }} Actualiser</button>
+  <a class="btn btn-accent" href="/migration?email={{ acc.email }}">{{ icon('send', 15) }} Migrer ce compte</a>
+{% endblock %}
+{% block content %}
+{% if msg %}<div class="alert alert-ok">{{ icon('check') }}<div>{{ msg }}</div></div>{% endif %}
+{% if error %}<div class="alert alert-ko">{{ icon('alert') }}<div>{{ error }}</div></div>{% endif %}
+<div class="alert alert-ko" id="live-error" hidden>{{ icon('alert') }}<div></div></div>
+<div class="alert alert-warn" id="gap-alert" hidden>{{ icon('alert') }}
+  <div><b id="gap-text"></b> La boîte a été modifiée dans Zimbra depuis l'import.
+    Cliquez sur « Vérifier et resynchroniser » puis « Migrer ce compte » : seuls les éléments manquants seront réimportés.</div></div>
+{% if active %}<div class="alert alert-info">{{ icon('activity') }}<div>Import en cours pour ce compte : les compteurs ci-dessous évoluent en temps réel.</div></div>{% endif %}
+
+{% set c = categories[p.cat] if p else None %}
+<section class="card">
+  <div class="card-head">
+    <div><div class="card-title">{{ icon('server') }} Boîte Zimbra</div>
+      <div class="card-sub">Présent dans Zimbra <b>maintenant</b>, comparé à ce que la plateforme a importé · <span id="at">lecture…</span></div></div>
+    {% if c %}<span class="cat-badge"><span class="swatch" style="background:{{ c.color }}"></span>{{ c.one }}</span>{% endif %}
+  </div>
+  <div class="kpis" style="margin-bottom:0;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+    <div class="kpi"><div class="kpi-top"><span class="kpi-label">Taille de la boîte</span><span class="kpi-icon">{{ icon('database') }}</span></div>
+      <div class="kpi-value" id="k-size">{{ (usage.used if usage else 0) | mo }}</div>
+      {% if usage and usage.quota %}
+        <div class="progress" style="margin-top:8px"><span style="width:{{ [100, (100 * usage.used / usage.quota) | round] | min }}%"></span></div>
+        <div class="kpi-foot">quota {{ usage.quota | mo }}</div>
+      {% else %}<div class="kpi-foot">quota illimité ou inconnu</div>{% endif %}
+    </div>
+    {% for k, label, ico in [('mail', 'Mails', 'mail'), ('appt', 'Rendez-vous', 'calendar'), ('contact', 'Contacts', 'contact'), ('task', 'Tâches', 'task')] %}
+    <div class="kpi" id="kpi-{{ k }}"><div class="kpi-top"><span class="kpi-label">{{ label }}</span><span class="kpi-icon">{{ icon(ico) }}</span></div>
+      <div class="kpi-value" data-present="{{ k }}">—</div>
+      <div class="kpi-foot">importés par la plateforme : <b data-imported="{{ k }}">—</b></div>
+      <div class="kpi-foot" data-gap="{{ k }}" style="color:var(--ko-text);font-weight:600" hidden></div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<div class="grid-2">
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">{{ icon('refresh') }} Cohérence avec l'historique d'import</div>
+      <div class="card-sub">Si des éléments ont été supprimés dans Zimbra, la plateforme les oublie pour pouvoir les réimporter</div></div></div>
+    {% if check %}
+      <p class="muted" style="margin-top:0">Dernière vérification le {{ check.checked_at | dt }} :
+        {% if check.reset %}historique effacé manuellement.
+        {% elif check.removed %}<b style="color:var(--ko-text)">{{ check.removed }} élément(s) absent(s) de la boîte</b>, à réimporter.
+        {% else %}boîte conforme.{% endif %}</p>
+    {% else %}<p class="muted" style="margin-top:0">Jamais vérifiée. La vérification est aussi faite automatiquement au début de chaque import.</p>{% endif %}
+    <form method="post" action="/comptes/{{ acc.email }}/verifier">
+      <button class="btn btn-accent" {{ 'disabled' if active }}>{{ icon('refresh', 15) }} Vérifier et resynchroniser</button></form>
+    <details style="margin-top:18px"><summary>Réinitialiser complètement l'historique de ce compte</summary>
+      <div class="confirm-box">
+        <p class="muted" style="margin-top:0">À n'utiliser que si la boîte a été <b>entièrement vidée</b> : le prochain import renverra tout le contenu des PST.
+          Si la boîte contient encore des éléments importés, ils seront en double.</p>
+        <form method="post" action="/comptes/{{ acc.email }}/reinitialiser" class="input-row">
+          <input name="confirm" placeholder="Saisir REINITIALISER" autocomplete="off" style="max-width:260px">
+          <button class="btn btn-danger" {{ 'disabled' if active }}>Réinitialiser</button></form>
+      </div>
+    </details>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('archive') }} PST attribués</div><a class="btn btn-ghost btn-sm" href="/inventaire">Inventaire</a></div>
+    {% if files %}
+      <div class="checks">{% for f in files %}
+        <div class="check {{ 'ok' if f.status == 'prêt' else 'warn' }}"><span class="check-icon">{{ icon('file') }}</span>
+          <div class="check-body"><div class="check-title"><span>{{ f.name }}</span>{{ status_badge(f.status) }}</div>
+            <div class="check-detail">{{ f.size | mo }} · {{ f.method or '—' }}</div></div></div>{% endfor %}</div>
+    {% else %}<div class="empty" style="padding:20px">Aucun PST pour ce compte.</div>{% endif %}
+  </section>
+</div>
+
+<section class="card flush">
+  <div class="card-head" style="padding-bottom:14px"><div><div class="card-title">{{ icon('archive') }} Dossiers dans Zimbra</div>
+    <div class="card-sub">Lecture en direct (GetFolderRequest)</div></div></div>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>Dossier</th><th>Type</th><th class="num">Éléments</th><th class="num">Non lus</th><th class="num">Taille</th></tr></thead>
+    <tbody id="folders"><tr><td colspan="5" class="muted">Lecture de la boîte…</td></tr></tbody>
+  </table></div>
+</section>
+
+<section class="card flush">
+  <div class="card-head" style="padding-bottom:14px"><div class="card-title">{{ icon('activity') }} Historique des lots</div></div>
+  {% if runs %}
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>Lot</th><th>Mode</th><th>Statut</th><th>PST</th><th class="num">Traités</th></tr></thead>
+    <tbody>{% for r in runs %}
+      <tr><td><a class="cell-main" href="/suivi/{{ r.run_id }}">Lot #{{ r.run_id }}</a><div class="cell-sub">{{ r.created | dt }}</div></td>
+        <td>{{ 'Import réel' if r.mode == 'réel' else 'Simulation' }}</td><td>{{ status_badge(r.status) }}</td>
+        <td class="cell-sub">{{ r.file }}</td><td class="num">{{ r.done }} / {{ r.total }}</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<div class="empty" style="padding:20px">Aucun lot pour ce compte.</div>{% endif %}
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const EMAIL = {{ acc.email | tojson }};
+  const VIEW = {message: 'Mails', appointment: 'Calendrier', contact: 'Contacts', task: 'Tâches'};
+  const fmt = n => (n ?? 0).toLocaleString('fr-FR');
+  const mo = n => (n / 1048576).toLocaleString('fr-FR', {maximumFractionDigits: 1}) + ' Mo';
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  let timer, active = {{ 'true' if active else 'false' }};
+
+  function render(d) {
+    document.getElementById('k-size').textContent = mo(d.size);
+    for (const k of ['mail', 'appt', 'contact', 'task']) {
+      document.querySelector(`[data-present="${k}"]`).textContent = fmt(d.present[k]);
+      document.querySelector(`[data-imported="${k}"]`).textContent = fmt(d.imported[k]);
+      const gap = d.imported[k] - d.present[k], el = document.querySelector(`[data-gap="${k}"]`);
+      el.hidden = !(gap > 0 && !d.active);
+      el.textContent = `${fmt(gap)} importé(s) absent(s) de la boîte`;
+      document.getElementById('kpi-' + k).classList.toggle('ko', gap > 0 && !d.active);
+    }
+    const missing = ['mail', 'appt', 'contact', 'task'].reduce((a, k) => a + Math.max(0, d.imported[k] - d.present[k]), 0);
+    document.getElementById('gap-alert').hidden = !(missing > 0 && !d.active);
+    document.getElementById('gap-text').textContent = `${fmt(missing)} élément(s) importé(s) ne sont plus dans la boîte.`;
+    document.getElementById('folders').innerHTML = d.folders.map(f => `<tr>
+      <td class="cell-main">${esc(f.path)}</td><td class="cell-sub">${VIEW[f.view] || esc(f.view)}</td>
+      <td class="num">${fmt(f.n)}</td><td class="num">${f.view === 'message' ? fmt(f.unread) : '—'}</td>
+      <td class="num">${mo(f.size)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Boîte vide.</td></tr>';
+    document.getElementById('at').textContent = 'lu à ' + new Date(d.at * 1000).toLocaleTimeString('fr-FR');
+    active = d.active;
+  }
+  async function poll() {
+    clearTimeout(timer);
+    const err = document.getElementById('live-error');
+    try {
+      const r = await fetch(`/api/comptes/${encodeURIComponent(EMAIL)}/etat`, {cache: 'no-store'});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || r.status);
+      render(d); err.hidden = true;
+    } catch (e) {
+      err.hidden = false; err.lastElementChild.textContent = 'Lecture de la boîte impossible : ' + e.message;
+    }
+    timer = setTimeout(poll, active ? 4000 : 15000);
+  }
+  document.getElementById('refresh').addEventListener('click', poll);
+  poll();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% from "_icons.html" import icon %}<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connexion · {{ brand.company }} {{ brand.product }}</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ css_v }}">
+  <style>:root { {% for k, v in brand.colors.items() %}--{{ k }}: {{ v }}; {% endfor %} }</style>
+</head>
+<body class="login-body">
+  <main class="login">
+    <div class="login-brand">
+      {% if brand.logo %}<img class="brand-logo" src="{{ brand.logo }}" alt="{{ brand.company }}">
+      {% else %}<span class="brand-mark">{{ icon('logo', 22) }}</span>
+        <span><div class="brand-name">Next<b>Step</b></div><div class="brand-sub">{{ brand.product }}</div></span>{% endif %}
+    </div>
+    <section class="card login-card">
+      <h1>Connexion</h1>
+      <p class="muted">{{ brand.tagline }} — accès réservé aux administrateurs de la migration.</p>
+      {% if not enabled %}
+        <div class="alert alert-warn">{{ icon('lock') }}<div>Aucun mot de passe d'accès défini. Sur le serveur : <code>./set-password.sh</code></div></div>
+      {% else %}
+        {% if error %}<div class="alert alert-ko">{{ icon('alert') }}<div>Mot de passe incorrect.</div></div>{% endif %}
+        <form method="post" action="/connexion" class="field">
+          <input type="hidden" name="next" value="{{ next }}">
+          <span>Mot de passe d'accès</span>
+          <input type="password" name="password" autofocus required autocomplete="current-password">
+          <button class="btn btn-accent btn-lg" style="margin-top:10px">{{ icon('lock', 16) }} Se connecter</button>
+        </form>
+      {% endif %}
+    </section>
+    <p class="login-foot">© {{ brand.company }} · v{{ brand.version }}</p>
+  </main>
+</body>
+</html>

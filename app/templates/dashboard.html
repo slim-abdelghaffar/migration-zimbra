@@ -1,0 +1,307 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon, status_badge %}
+{% set page_title = "Tableau de bord" %}
+{% set page_sub = "Pilotage en temps réel de la migration Outlook (PST) vers Zimbra" %}
+{% block actions %}
+  {% if password_set %}
+  <form method="post" action="/boites/verifier">
+    <button class="btn btn-ghost" {{ 'disabled' if d.verify.running }} title="Relit chaque boîte migrée dans Zimbra et détecte ce qui a été supprimé">{{ icon('shield', 16) }} Vérifier les boîtes migrées</button></form>
+  <form method="post" action="/inventaire"><input type="hidden" name="next" value="/">
+    <button class="btn btn-ghost" {{ 'disabled' if d.job.running }}>{{ icon('refresh', 16) }} Actualiser annuaire et PST</button></form>
+  {% endif %}
+  <a class="btn btn-accent" href="/migration">{{ icon('send', 16) }} Nouvelle migration</a>
+{% endblock %}
+{% block content %}
+
+{# --- Tâche d'inventaire en cours --- #}
+{% if error %}<div class="alert alert-ko">{{ icon('alert') }}<div>{{ error }}</div></div>{% endif %}
+<div id="job" class="card" {{ 'hidden' if not (d.job.running or d.verify.running) }}>
+  <div class="card-head" style="margin-bottom:10px"><div class="card-title">{{ icon('refresh') }} <span id="job-title">Analyse en cours…</span></div>
+    <span class="badge badge-run">en cours</span></div>
+  <div class="progress live" id="job-bar"><span style="width:0"></span></div>
+  <div class="progress-meta"><span id="job-text"></span><strong id="job-count"></strong></div>
+</div>
+{% if d.job.error %}<div class="alert alert-ko">{{ icon('alert') }}<div>Dernière analyse en échec : {{ d.job.error }}</div></div>{% endif %}
+
+{% if not d.total %}
+<section class="card hero">
+  <h2>Connectez l'administration Zimbra pour démarrer</h2>
+  <p>Saisissez une seule fois le compte et le mot de passe admin. La plateforme récupère alors automatiquement la liste
+     de tous les comptes, retrouve à qui appartient chaque fichier PST et calcule l'avancement de la migration.</p>
+  {% if password_set %}
+    {% if not d.job.running %}<form method="post" action="/inventaire"><input type="hidden" name="next" value="/">
+      <button class="btn btn-light">{{ icon('refresh', 16) }} Synchroniser l'annuaire</button></form>{% endif %}
+  {% else %}
+    <a class="btn btn-light" href="/configuration">{{ icon('lock', 16) }} Saisir les identifiants admin</a>
+  {% endif %}
+</section>
+{% else %}
+
+{# --- Bandeau de pilotage --- #}
+<section class="cockpit">
+  <div class="cockpit-main">
+    <div class="eyebrow">{{ brand.company }} · Programme de migration PST → Zimbra</div>
+    <h2>Avancement de la migration</h2>
+    <div class="cockpit-rate"><b id="rate">{{ d.rate_all | pct }}</b><span>%</span></div>
+    {% set m, t, r = d.counts.migre, d.total, d.remaining_all %}
+    <div class="cockpit-caption" id="caption">
+      <b>{{ m | n }}</b> compte{{ 's' if m > 1 }} migré{{ 's' if m > 1 }} sur <b>{{ t | n }}</b> comptes Zimbra
+      · <b>{{ r | n }}</b> restant{{ 's' if r > 1 }}
+    </div>
+    <div class="segbar" id="segbar" role="img" aria-label="Répartition de tous les comptes Zimbra par statut">
+      {% for c in d.categories %}<span data-seg="{{ c.key }}" style="flex-basis:{{ c.pct }}%;background:{{ c.color }}" title="{{ c.label }} : {{ c.n }}" {{ 'hidden' if not c.n }}></span>{% endfor %}
+    </div>
+    <div class="seg-legend">
+      {% for c in d.categories %}<span><i class="swatch" style="background:{{ c.color }}"></i>{{ c.label }} <b data-n="{{ c.key }}">{{ c.n | n }}</b></span>{% endfor %}
+    </div>
+  </div>
+  <div class="cockpit-tiles">
+    <div class="ctile"><div class="lbl">{{ icon('contact', 15) }} Comptes Zimbra</div>
+      <div class="val">{{ d.total | n }}</div><div class="sub">annuaire du {{ d.synced_at | dt }}</div></div>
+    <div class="ctile"><div class="lbl">{{ icon('archive', 15) }} Comptes avec PST</div>
+      <div class="val">{{ d.with_pst | n }}</div><div class="sub" id="scope-sub">dont {{ d.counts.migre }} migré{{ 's' if d.counts.migre > 1 }} ({{ d.rate | pct }} %) · {{ d.coverage | pct }} % de l'annuaire</div></div>
+    <div class="ctile"><div class="lbl">{{ icon('mail', 15) }} Éléments importés</div>
+      <div class="val" id="k-imported">{{ d.imported_total | n }}</div><div class="sub">mails, rendez-vous, contacts, tâches</div></div>
+    <div class="ctile"><div class="lbl">{{ icon('database', 15) }} Volume PST</div>
+      <div class="val">{{ d.pst_size | taille }}</div><div class="sub">{{ d.pst_files }} fichier(s) · boîtes : {{ d.usage_total | taille }}</div></div>
+  </div>
+</section>
+
+<div class="grid-2">
+  {# --- Répartition du périmètre --- #}
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">{{ icon('gauge') }} Répartition des comptes à migrer</div>
+        <div class="card-sub">Comptes ayant au moins un PST · cliquez sur un statut pour filtrer la liste</div></div>
+    </div>
+    <div class="scope-panel">
+      <div class="donut-wrap">
+        <svg id="donut" viewBox="0 0 200 200" width="210" height="210" role="img" aria-label="Répartition des comptes à migrer par statut"></svg>
+        <div class="donut-center"><b id="donut-n">{{ d.with_pst }}</b><span>comptes<br>à migrer</span></div>
+        <div class="tooltip" id="tip" hidden></div>
+      </div>
+      <div class="legend" id="legend">
+        {% for c in d.scope %}
+        <button type="button" class="legend-row" data-cat="{{ c.key }}">
+          <span class="swatch" style="background:{{ c.color }}"></span>
+          <span class="legend-label">{{ icon(c.icon, 15) }} {{ c.label }}</span>
+          <span class="legend-n" data-n="{{ c.key }}">{{ c.n }}</span>
+          <span class="legend-pct" data-pct="{{ c.key }}">{{ c.pct | pct }} %</span>
+        </button>
+        {% endfor %}
+        <button type="button" class="legend-row out" data-cat="sans_pst">
+          <span class="swatch" style="background:#d6dde6"></span>
+          <span class="legend-label">{{ icon('archive', 15) }} Sans PST</span>
+          <span class="legend-n" data-n="sans_pst">{{ d.counts.sans_pst }}</span>
+          <span class="legend-pct">hors périmètre</span>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  {# --- À faire --- #}
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">{{ icon('task') }} Actions en attente</div>
+      <div class="card-sub">Ce qui reste à faire pour terminer la migration</div></div></div>
+    {% set todo = [
+      (d.to_validate, 'alert', 'warn', 'PST à valider', 'propriétaire proposé automatiquement', '/inventaire'),
+      (d.orphans + d.invalid, 'x', 'ko', 'PST non attribués ou invalides', 'à rattacher ou remplacer', '/inventaire'),
+      (d.counts.echec, 'x', 'ko', 'Comptes en échec', 'à relancer après correction', '/migration'),
+      (d.modified_n, 'refresh', 'warn', 'Boîtes modifiées dans Zimbra', 'contenu supprimé, à réimporter', '/migration'),
+      (d.counts.a_migrer, 'send', '', 'Comptes prêts à migrer', 'PST validé, import à lancer', '/migration'),
+      (d.counts.en_cours, 'activity', 'ok', 'Comptes en cours d\'import', 'suivi en direct', '/suivi')] | selectattr(0) | list %}
+    {% if todo %}
+    <div class="todo">
+      {% for n, ico, tone, title, sub, href in todo %}
+      <a class="todo-row" href="{{ href }}">
+        <span class="check-icon {{ tone }}">{{ icon(ico, 16) }}</span>
+        <span class="todo-text"><b>{{ title }}</b><span>{{ sub }}</span></span>
+        <span class="todo-n">{{ n }}</span>{{ icon('arrow-right', 15) }}
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+      <div class="empty" style="padding:30px 10px">{{ icon('check', 30) }}<div>Aucune action en attente : tous les comptes du périmètre sont migrés.</div></div>
+    {% endif %}
+  </section>
+</div>
+
+{% if d.invalid %}
+<div class="alert alert-ko">{{ icon('alert') }}
+  <div><b>{{ d.invalid }}</b> fichier(s) PST invalide(s) (vide, incomplet ou pas au format PST) : ils sont ignorés.
+    <a href="/inventaire">Voir lesquels</a></div>
+</div>
+{% endif %}
+{% if d.to_validate or d.orphans %}
+<div class="alert alert-warn">{{ icon('alert') }}
+  <div><b>{{ d.to_validate }}</b> PST dont le propriétaire est proposé automatiquement attendent votre validation,
+    <b>{{ d.orphans }}</b> PST ne sont rattachés à aucun compte. <a href="/inventaire">Ouvrir l'inventaire</a></div>
+</div>
+{% endif %}
+
+{# --- Tous les comptes --- #}
+<section class="card flush">
+  <div class="card-head" style="padding-bottom:14px;flex-wrap:wrap">
+    <div><div class="card-title">{{ icon('contact') }} Tous les comptes</div>
+      <div class="card-sub">Qui a été migré, qui ne l'a pas été, et quels PST appartiennent à qui</div></div>
+    <input type="search" id="search" placeholder="Rechercher un nom ou une adresse…" style="max-width:300px">
+  </div>
+  <div class="chips" id="chips">
+    <button type="button" class="chip active" data-cat="">Tous <b>{{ d.total }}</b></button>
+    {% for c in d.categories %}
+      <button type="button" class="chip" data-cat="{{ c.key }}"><span class="swatch" style="background:{{ c.color }}"></span>{{ c.label }} <b data-chip="{{ c.key }}">{{ c.n }}</b></button>
+    {% endfor %}
+  </div>
+  <div class="table-wrap"><table class="table" id="accounts">
+    <thead><tr><th>Compte</th><th>Statut</th><th>PST</th><th class="num">Boîte Zimbra</th><th>Dernier import</th><th class="num">Éléments importés</th><th></th></tr></thead>
+    <tbody>
+    {% for r in d.rows %}
+      {% set c = d.categories | selectattr('key', 'equalto', r.cat) | first %}
+      <tr data-email="{{ r.email }}" data-cat="{{ r.cat }}" data-q="{{ (r.email ~ ' ' ~ r.name ~ ' ' ~ r.pst_names | join(' ')) | lower }}">
+        <td><div class="account-id"><span class="avatar sm">{{ (r.name or r.email)[0] }}</span>
+          <div><a class="cell-main" href="/comptes/{{ r.email }}" style="color:inherit;text-decoration:none">{{ r.name or r.email.split('@')[0] }}</a><div class="cell-sub">{{ r.email }}</div></div></div></td>
+        <td class="cat-cell"><span class="cat-badge"><span class="swatch" style="background:{{ c.color }}"></span>{{ c.one }}</span>
+          {% if r.modified %}<div class="cell-sub" style="color:var(--ko-text)">boîte modifiée dans Zimbra</div>
+          {% elif r.simulated and r.cat in ('a_migrer', 'echec') %}<div class="cell-sub">simulation OK</div>{% endif %}</td>
+        <td>{% if r.pst %}<div class="cell-main" style="font-weight:500">{{ r.pst_names | join(', ') }}</div><div class="cell-sub">{{ r.size | mo }}</div>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="num">{% if r.usage %}{{ r.usage.used | mo }}{% if r.usage.quota %}<div class="cell-sub">/ {{ r.usage.quota | mo }}</div>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td>{% if r.run %}<a href="/suivi/{{ r.run.id }}">Lot #{{ r.run.id }}</a> {{ status_badge(r.run.status) }}<div class="cell-sub">{{ r.run.date | dt }}</div>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="num">{{ r.imported or '—' }}</td>
+        <td class="num">
+          {% if r.cat in ('a_migrer', 'echec') %}<a class="btn btn-ghost btn-sm" href="/migration?email={{ r.email }}">{{ icon('send', 13) }} Migrer</a>
+          {% elif r.cat == 'a_valider' %}<a class="btn btn-ghost btn-sm" href="/inventaire">{{ icon('check', 13) }} Valider</a>{% endif %}
+          <a class="btn btn-ghost btn-sm" href="/comptes/{{ r.email }}" title="État de la boîte">{{ icon('server', 13) }}</a>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="empty" id="no-match" hidden>Aucun compte ne correspond.</div>
+</section>
+{% endif %}
+
+<script id="dash-data" type="application/json">{{ {"categories": d.categories, "scope": d.scope, "rate": d.rate, "job": d.job, "verify": d.verify, "active": d.active} | tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const NS = 'http://www.w3.org/2000/svg';
+  const data = JSON.parse(document.getElementById('dash-data').textContent);
+  const fmt = n => (n ?? 0).toLocaleString('fr-FR');
+  const pct = x => (Math.round(x * 10) / 10).toLocaleString('fr-FR');
+  let filter = '';
+
+  // --- Anneau : segments séparés par un espace de 2px, survol = info-bulle, clic = filtre ---
+  function donut(categories) {
+    const svg = document.getElementById('donut');
+    if (!svg) return;
+    svg.innerHTML = '';
+    const total = categories.reduce((a, c) => a + c.n, 0);
+    const R = 78, W = 26, C = 2 * Math.PI * R, GAP = total > 1 ? 2 : 0;
+    const bg = document.createElementNS(NS, 'circle');
+    Object.entries({cx: 100, cy: 100, r: R, fill: 'none', stroke: '#eef2f7', 'stroke-width': W}).forEach(([k, v]) => bg.setAttribute(k, v));
+    svg.appendChild(bg);
+    let off = 0;
+    categories.filter(c => c.n).forEach(c => {
+      const len = C * c.n / total;
+      const seg = document.createElementNS(NS, 'circle');
+      Object.entries({cx: 100, cy: 100, r: R, fill: 'none', stroke: c.color, 'stroke-width': W,
+        'stroke-dasharray': `${Math.max(len - GAP, 0.5)} ${C}`, 'stroke-dashoffset': -off,
+        transform: 'rotate(-90 100 100)', class: 'seg' + (filter && filter !== c.key ? ' dim' : '')})
+        .forEach(([k, v]) => seg.setAttribute(k, v));
+      seg.dataset.cat = c.key;
+      seg.addEventListener('mousemove', e => tip(e, `<b>${c.label}</b><br>${fmt(c.n)} compte(s) · ${pct(c.pct)} % du périmètre`));
+      seg.addEventListener('mouseleave', () => { document.getElementById('tip').hidden = true; });
+      seg.addEventListener('click', () => setFilter(filter === c.key ? '' : c.key));
+      svg.appendChild(seg);
+      off += len;
+    });
+  }
+  function tip(e, html) {
+    const t = document.getElementById('tip'), box = t.parentElement.getBoundingClientRect();
+    t.innerHTML = html; t.hidden = false;
+    t.style.left = (e.clientX - box.left + 14) + 'px'; t.style.top = (e.clientY - box.top + 14) + 'px';
+  }
+
+  // --- Filtres et recherche ---
+  function apply() {
+    const q = (document.getElementById('search')?.value || '').trim().toLowerCase();
+    let shown = 0;
+    document.querySelectorAll('#accounts tbody tr').forEach(tr => {
+      const ok = (!filter || tr.dataset.cat === filter) && (!q || tr.dataset.q.includes(q));
+      tr.hidden = !ok; shown += ok;
+    });
+    const nm = document.getElementById('no-match'); if (nm) nm.hidden = shown > 0;
+    document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c.dataset.cat === filter));
+    document.querySelectorAll('.legend-row').forEach(c => c.classList.toggle('dim', !!filter && c.dataset.cat !== filter));
+    donut(data.scope);
+  }
+  function setFilter(cat) { filter = cat; apply(); }
+  document.querySelectorAll('.chip, .legend-row').forEach(b => b.addEventListener('click', () => setFilter(b.dataset.cat === filter ? '' : b.dataset.cat)));
+  document.getElementById('search')?.addEventListener('input', apply);
+  donut(data.scope);
+
+  // --- Actualisation en direct (analyse ou migration en cours) ---
+  const CAT = Object.fromEntries(data.categories.map(c => [c.key, c]));
+  function update(d) {
+    data.categories = d.categories; data.scope = d.scope;
+    d.categories.forEach(c => document.querySelectorAll(`[data-n="${c.key}"], [data-chip="${c.key}"]`).forEach(el => el.textContent = c.n));
+    d.scope.forEach(c => { const p = document.querySelector(`[data-pct="${c.key}"]`); if (p) p.textContent = pct(c.pct) + ' %'; });
+    d.categories.forEach(c => {
+      const sg = document.querySelector(`[data-seg="${c.key}"]`); if (sg) { sg.style.flexBasis = c.pct + '%'; sg.hidden = !c.n; }
+    });
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('rate', pct(d.rate_all)); set('donut-n', d.with_pst); set('k-imported', fmt(d.imported_total));
+    const s = n => n > 1 ? 's' : '', m = d.counts.migre, cap = document.getElementById('caption');
+    if (cap) cap.innerHTML = `<b>${fmt(m)}</b> compte${s(m)} migré${s(m)} sur <b>${fmt(d.total)}</b> comptes Zimbra · <b>${fmt(d.remaining_all)}</b> restant${s(d.remaining_all)}`;
+    set('scope-sub', `dont ${m} migré${s(m)} (${pct(d.rate)} %) · ${pct(d.coverage)} % de l'annuaire`);
+    Object.entries(d.rows).forEach(([email, cat]) => {
+      const tr = document.querySelector(`tr[data-email="${CSS.escape(email)}"]`);
+      if (tr && tr.dataset.cat !== cat) {
+        tr.dataset.cat = cat;
+        tr.querySelector('.cat-badge').innerHTML = `<span class="swatch" style="background:${CAT[cat].color}"></span>${CAT[cat].one}`;
+      }
+    });
+    const j = d.job, v = d.verify, box = document.getElementById('job');
+    box.hidden = !(j.running || v.running);
+    if (v.running && !j.running) {
+      document.getElementById('job-title').textContent = 'Vérification des boîtes migrées dans Zimbra…';
+      const bar = document.getElementById('job-bar');
+      bar.classList.toggle('indeterminate', !v.total);
+      bar.firstElementChild.style.width = (v.total ? Math.round(100 * v.done / v.total) : 0) + '%';
+      document.getElementById('job-text').textContent = `Lecture des boîtes (lecture seule) · ${v.removed} élément(s) supprimé(s) détecté(s)`;
+      document.getElementById('job-count').textContent = v.total ? `${v.done} / ${v.total} boîtes` : '';
+    }
+    if (j.running) {
+      document.getElementById('job-title').textContent = j.step === 'annuaire' ? "Synchronisation de l'annuaire Zimbra…"
+        : (j.step === 'copie' ? `Copie en cours : ${j.total} PST en attente, analyse automatique dès la fin` : 'Analyse des fichiers PST et identification des propriétaires…');
+      const pct = j.total ? Math.round(100 * j.done / j.total) : 0;
+      const bar = document.getElementById('job-bar');
+      bar.classList.toggle('indeterminate', !j.total);
+      bar.firstElementChild.style.width = pct + '%';
+      document.getElementById('job-text').textContent = j.total ? 'Lecture du contenu (java-libpst, lecture seule)' : 'Récupération de la liste des comptes (SearchDirectoryRequest)';
+      document.getElementById('job-count').textContent = j.total ? `${j.done} / ${j.total} PST` : '';
+    }
+    apply();
+    return d;
+  }
+  let wasRunning = data.job.running || data.verify.running;
+  async function poll() {
+    try {
+      const r = await fetch('/api/tableau-de-bord', {cache: 'no-store'});
+      if (r.ok) {
+        const d = update(await r.json());
+        const running = d.job.running || d.verify.running;
+        if (wasRunning && !running) return location.reload();  // nouvelle liste de comptes / PST / vérification
+        wasRunning = running;
+        if (running || d.active) setTimeout(poll, 2000);
+        return;
+      }
+    } catch (e) { /* nouvelle tentative */ }
+    setTimeout(poll, 5000);
+  }
+  if (data.job.running || data.verify.running || data.active) setTimeout(poll, 1000);
+})();
+</script>
+{% endblock %}

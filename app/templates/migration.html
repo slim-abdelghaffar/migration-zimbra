@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page_title = "Nouvelle migration" %}
+{% set page_sub = "Sélection des comptes, simulation ou import réel" %}
+{% block content %}
+{% if extractor_error %}<div class="alert alert-ko">{{ icon('alert') }}<div>Extraction impossible : {{ extractor_error }}</div></div>{% endif %}
+{% if error %}<div class="alert alert-ko">{{ icon('alert') }}<div>{{ error }}</div></div>{% endif %}
+
+{% if not rows %}
+<section class="card"><div class="empty">{{ icon('archive', 30) }}
+  <div>Aucun compte prêt. Lancez d'abord l'<a href="/inventaire">inventaire</a>.</div></div></section>
+{% else %}
+<form method="post" id="lot">
+  <section class="card flush">
+    <div class="card-head" style="padding-bottom:16px">
+      <div><div class="card-title">{{ icon('archive') }} 1. Comptes à migrer</div>
+        <div class="card-sub">Comptes ayant au moins un PST attribué et validé. Les comptes déjà migrés sont décochés.</div></div>
+      <span class="badge badge-brand plain"><span id="nsel">0</span>&nbsp;sélectionné(s)</span>
+    </div>
+    <div class="table-wrap"><table class="table">
+      <thead><tr><th style="width:44px"><input type="checkbox" id="all" aria-label="Tout sélectionner"></th>
+        <th>Compte</th><th>PST attribués</th><th class="num">Taille</th><th>Avancement</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        {% set cat = r.progress.cat if r.progress else 'a_migrer' %}
+        {% set checked = (r.email == preselect) if preselect else (cat != 'migre') %}
+        <tr>
+          <td><input type="checkbox" name="emails" value="{{ r.email }}" class="acc" {{ 'disabled' if r.email in busy else ('checked' if checked) }}></td>
+          <td><div class="cell-main">{{ r.progress.name if r.progress and r.progress.name else r.email }}</div><div class="cell-sub">{{ r.email }}</div></td>
+          <td class="cell-sub">{{ r.files | join(', ') }}</td>
+          <td class="num">{{ r.size | mo }}</td>
+          <td>{% if r.email in busy %}<span class="badge badge-run">en cours</span>
+              {% elif cat == 'migre' %}<span class="badge badge-ok">déjà migré</span>
+              {% elif cat == 'echec' %}<span class="badge badge-ko">échec précédent</span>
+              {% else %}<span class="badge">à migrer</span>{% endif %}
+              {% if r.progress and r.progress.simulated %}<span class="badge plain badge-brand">simulé</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('settings') }} 2. Mode</div></div>
+    <div class="choices">
+      <label class="choice">
+        <input type="radio" name="mode" value="simulation" checked>
+        <span><span class="choice-title">{{ icon('flask', 16) }} Simulation <span class="badge badge-brand plain">recommandé</span></span>
+          <span class="choice-text" style="display:block">Jeton, concordance, extraction et comptage complets.
+            <b>Aucune écriture</b> dans Zimbra.</span></span>
+      </label>
+      <label class="choice danger">
+        <input type="radio" name="mode" value="reel">
+        <span><span class="choice-title">{{ icon('send', 16) }} Import réel</span>
+          <span class="choice-text" style="display:block">Écrit les mails, rendez-vous, contacts et tâches dans les boîtes.
+            Les éléments déjà importés sont ignorés.</span></span>
+      </label>
+    </div>
+    <div class="form-grid" style="margin-top:18px;max-width:420px">
+      <label class="field"><span>Mode delta (optionnel) : mails depuis le</span>
+        <input type="date" name="since">
+        <span class="help">Calendrier, contacts et tâches sont toujours traités en entier</span></label>
+    </div>
+    <div class="confirm-box" id="confirm" hidden>
+      <div class="card-title" style="color:var(--ko-text)">{{ icon('alert', 16) }} Confirmation de l'import réel</div>
+      <p class="muted" style="margin:6px 0 12px">Les éléments seront écrits dans les boîtes Zimbra des <b id="nsel2">0</b> compte(s)
+        sélectionné(s). Un compte n'est importé que si le nom du PST correspond au compte renvoyé par le jeton.</p>
+      <label style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+        <input type="checkbox" name="confirm_check" value="1"> Je confirme l'écriture dans ces comptes</label>
+      <label class="field" style="max-width:340px"><span>Saisir <code>{{ confirm_word }}</code></span>
+        <input name="confirm" autocomplete="off"></label>
+    </div>
+  </section>
+
+  <div class="input-row" style="justify-content:flex-end">
+    <button type="submit" id="go" class="btn btn-accent btn-lg" {{ 'disabled' if extractor_error }}>{{ icon('play', 16) }} <span>Lancer la simulation</span></button>
+  </div>
+</form>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const accs = [...document.querySelectorAll('.acc:not([disabled])')];
+  if (!accs.length) return;
+  const count = () => { const n = accs.filter(a => a.checked).length;
+    document.getElementById('nsel').textContent = n; document.getElementById('nsel2').textContent = n; };
+  const all = document.getElementById('all');
+  all.checked = accs.every(a => a.checked);
+  all.addEventListener('change', e => { accs.forEach(a => a.checked = e.target.checked); count(); });
+  accs.forEach(a => a.addEventListener('change', count));
+  const go = document.getElementById('go');
+  document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', () => {
+    const real = document.querySelector('input[name=mode]:checked').value === 'reel';
+    document.getElementById('confirm').hidden = !real;
+    go.querySelector('span').textContent = real ? "Lancer l'import réel" : 'Lancer la simulation';
+    go.classList.toggle('btn-danger', real); go.classList.toggle('btn-accent', !real);
+  }));
+  count();
+})();
+</script>
+{% endblock %}

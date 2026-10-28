@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon, status_badge %}
+{% set page_title = "Suivi des lots" %}
+{% set page_sub = "Historique des simulations et des imports réels" %}
+{% block actions %}<a class="btn btn-accent" href="/migration">{{ icon('send', 16) }} Nouvelle migration</a>{% endblock %}
+{% block content %}
+<section class="card flush">
+  {% if runs %}
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>Lot</th><th>Mode</th><th>Delta</th><th>Statut</th><th class="num">Réussis</th><th class="num">Échecs</th><th class="num">Comptes</th><th></th></tr></thead>
+    <tbody>
+    {% for r in runs %}
+      <tr>
+        <td><a class="cell-main" href="/suivi/{{ r.id }}">Lot #{{ r.id }}</a><div class="cell-sub">{{ r.created | dt }}</div></td>
+        <td><span class="badge plain {{ 'badge-ko' if r.mode == 'réel' else 'badge-brand' }}">{{ 'Import réel' if r.mode == 'réel' else 'Simulation' }}</span></td>
+        <td class="cell-sub">{{ r.since or '—' }}</td>
+        <td>{{ status_badge(r.status) }}</td>
+        <td class="num">{{ r.ok or 0 }}</td>
+        <td class="num">{{ r.ko or 0 }}</td>
+        <td class="num">{{ r.n }}</td>
+        <td class="num"><a class="btn btn-ghost btn-sm" href="/suivi/{{ r.id }}">Détail</a>
+          <a class="btn btn-ghost btn-sm" href="/suivi/{{ r.id }}/rapport.csv">{{ icon('download', 14) }} CSV</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+    <div class="empty">{{ icon('activity', 30) }}<div>Aucun lot. <a href="/migration">Lancer une migration</a></div></div>
+  {% endif %}
+</section>
+{% endblock %}

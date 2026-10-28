@@ -1,0 +1,61 @@
+{% from "_icons.html" import icon %}<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ page_title }}{% endblock %} · {{ brand.company }} {{ brand.product }}</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ css_v }}">
+  <style>:root { {% for k, v in brand.colors.items() %}--{{ k }}: {{ v }}; {% endfor %} }</style>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2300a0df'/%3E%3Cpath d='M6 17l5-5-5-5M12 17l5-5-5-5' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <a class="brand" href="/">
+      {% if brand.logo %}
+        <img class="brand-logo" src="{{ brand.logo }}" alt="{{ brand.company }}">
+      {% else %}
+        <span class="brand-mark">{{ icon('logo', 22) }}</span>
+        <span>
+          <div class="brand-name">Next<b>Step</b></div>
+          <div class="brand-sub">{{ brand.product }}</div>
+        </span>
+      {% endif %}
+    </a>
+    <nav class="nav">
+      {% for section, items in nav %}
+        <div class="nav-section">{{ section }}</div>
+        {% for href, label, ico in items %}
+          <a href="{{ href }}" class="{{ 'active' if path == href or (href != '/' and path.startswith(href ~ '/')) }}">
+            {{ icon(ico) }} {{ label }}</a>
+        {% endfor %}
+      {% endfor %}
+    </nav>
+    <div class="sidebar-foot">
+      <a href="/configuration" class="session {{ 'on' if password_set }}" style="text-decoration:none">
+        <span class="dot"></span>
+        {{ 'Session admin active' if password_set else 'Admin non connecté' }}
+      </a>
+      {% if auth %}<form method="post" action="/deconnexion" style="margin:0 0 10px">
+        <button class="session" style="width:100%;border:0;cursor:pointer;font:inherit">{{ icon('lock', 14) }} Se déconnecter</button></form>{% endif %}
+      <div class="copyright">© {{ brand.company }} · v{{ brand.version }}</div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <h1>{{ page_title }}</h1>
+        {% if page_sub %}<div class="sub">{{ page_sub }}</div>{% endif %}
+      </div>
+      <div class="topbar-actions">{% block actions %}{% endblock %}</div>
+    </header>
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="footer">{{ brand.company }} {{ brand.product }} — {{ brand.tagline }} · Zimbra 10.1 · jetons délégués, aucun mot de passe utilisateur</footer>
+  </div>
+</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

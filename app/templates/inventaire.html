@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon, status_badge %}
+{% set page_title = "Inventaire des PST" %}
+{% set page_sub = "Chaque fichier PST est rattaché automatiquement à son propriétaire dans l'annuaire Zimbra" %}
+{% block actions %}
+  <form method="post" action="/inventaire"><button class="btn btn-accent" {{ 'disabled' if job.running }}>{{ icon('refresh', 16) }} Analyser le dossier PST</button></form>
+{% endblock %}
+{% block content %}
+{% if error %}<div class="alert alert-ko">{{ icon('alert') }}<div>{{ error }}</div></div>{% endif %}
+{% if msg %}<div class="alert alert-ok">{{ icon('check') }}<div>{{ msg }}</div></div>{% endif %}
+{% if job.error %}<div class="alert alert-ko">{{ icon('alert') }}<div>Dernière analyse en échec : {{ job.error }}</div></div>{% endif %}
+{% if not password_set %}<div class="alert alert-warn">{{ icon('lock') }}<div>Mot de passe admin non saisi : l'annuaire ne peut pas être synchronisé.
+  <a href="/configuration">Configurer</a></div></div>{% endif %}
+
+<div id="job" class="card" {{ 'hidden' if not job.running }}>
+  <div class="card-head" style="margin-bottom:10px"><div class="card-title">{{ icon('refresh') }} <span id="job-title">Analyse en cours…</span></div>
+    <span class="badge badge-run">en cours</span></div>
+  <div class="progress live indeterminate" id="job-bar"><span></span></div>
+  <div class="progress-meta"><span id="job-text">Synchronisation de l'annuaire</span><strong id="job-count"></strong></div>
+</div>
+
+{% set ready = files | selectattr('status', 'equalto', 'prêt') | list %}
+{% set proposed = files | selectattr('status', 'equalto', 'à valider') | list %}
+<div class="kpis">
+  <div class="kpi"><div class="kpi-top"><span class="kpi-label">Fichiers PST</span><span class="kpi-icon">{{ icon('file') }}</span></div>
+    <div class="kpi-value">{{ files | length }}</div><div class="kpi-foot">{{ files | sum(attribute='size') | mo }} · {{ settings.pst_dir }}</div></div>
+  <div class="kpi ok"><div class="kpi-top"><span class="kpi-label">Attribués (prêts)</span><span class="kpi-icon">{{ icon('check') }}</span></div>
+    <div class="kpi-value">{{ ready | length }}</div><div class="kpi-foot">{{ ready | map(attribute='email') | unique | list | length }} compte(s)</div></div>
+  <div class="kpi warn"><div class="kpi-top"><span class="kpi-label">À valider</span><span class="kpi-icon">{{ icon('alert') }}</span></div>
+    <div class="kpi-value">{{ proposed | length }}</div><div class="kpi-foot">propriétaire proposé automatiquement</div></div>
+  <div class="kpi ko"><div class="kpi-top"><span class="kpi-label">Non attribués</span><span class="kpi-icon">{{ icon('x') }}</span></div>
+    <div class="kpi-value">{{ files | length - ready | length - proposed | length }}</div><div class="kpi-foot">aucun compte identifié</div></div>
+</div>
+
+<section class="card">
+  <div class="card-head"><div class="card-title">{{ icon('info') }} Comment le propriétaire est trouvé</div>
+    <span class="cell-sub">Annuaire : {{ accounts | length }} comptes{% if synced_at %}, synchronisé le {{ synced_at | dt }}{% endif %}</span></div>
+  <div class="grid-3">
+    <div class="check ok"><span class="check-icon">{{ icon('check') }}</span><div class="check-body"><div class="check-title">Adresse exacte</div>
+      <div class="check-detail">Le fichier ou un dossier parent porte l'adresse : <code>ali.bensalah@…pst</code>, <code>ali.bensalah@…/Outlook.pst</code>. Attribution automatique.</div></div></div>
+    <div class="check warn"><span class="check-icon">{{ icon('archive') }}</span><div class="check-body"><div class="check-title">Nom du fichier ou du dossier</div>
+      <div class="check-detail">Dans n'importe quel ordre : <code>benabdelghaffar.slim</code>, <code>BEN ABDELGHAFFAR Slim (archive 2023)</code>,
+        initiale (<code>s.benabdelghaffar</code>), identifiant Windows (<code>Users/sbenabdelghaffar/…</code>), nom seul, petite faute de frappe.</div></div></div>
+    <div class="check warn"><span class="check-icon">{{ icon('mail') }}</span><div class="check-body"><div class="check-title">Contenu du PST</div>
+      <div class="check-detail">Expéditeur des Éléments envoyés, destinataire des mails reçus, nom interne du PST (java-libpst, lecture seule).
+        <b>Nom et contenu concordants : attribution automatique.</b></div></div></div>
+  </div>
+</section>
+
+<section class="card flush">
+  <div class="card-head" style="padding-bottom:16px">
+    <div><div class="card-title">{{ icon('archive') }} Fichiers détectés</div>
+      <div class="card-sub">Seuls les PST <b>prêts</b> (attribution exacte ou validée) peuvent être migrés</div></div>
+    {% if proposed %}<form method="post" action="/inventaire/valider-tout">
+      <button class="btn btn-accent btn-sm">{{ icon('check', 14) }} Valider les {{ proposed | length }} proposition(s)</button></form>{% endif %}
+  </div>
+  {% if files %}
+  <datalist id="accounts">{% for a in accounts %}<option value="{{ a }}">{% endfor %}</datalist>
+  <div class="table-wrap"><table class="table">
+    <thead><tr><th>Fichier PST</th><th>Propriétaire</th><th>Méthode de détection</th><th>Statut</th></tr></thead>
+    <tbody>
+    {% for f in files %}
+      <tr>
+        <td><div class="cell-main">{{ icon('file', 14) }} {{ f.name }}</div>
+          <div class="cell-sub">{{ f.folder }} · {{ f.size | mo }}</div></td>
+        <td style="min-width:400px">
+          {% if f.status == 'copie en cours' %}
+            <div class="cell-main">{{ f.email or '—' }}</div>
+            <div class="cell-sub">en attente de la fin de la copie, puis analyse automatique</div>
+          {% elif f.status == 'fichier invalide' %}
+            <div class="cell-main">{{ f.email or '—' }}</div>
+            <div class="cell-sub" style="color:var(--ko-text)">à remplacer par un PST valide, puis relancer l'analyse</div>
+          {% elif f.status == 'prêt' %}
+            <div class="cell-main">{{ f.email }}</div>
+            {% if f.method == 'validé manuellement' %}
+            <form method="post" action="/inventaire/annuler" style="margin-top:4px"><input type="hidden" name="file" value="{{ f.file }}">
+              <button class="btn btn-ghost btn-sm">Annuler la validation</button></form>{% endif %}
+          {% else %}
+            <form method="post" action="/inventaire/valider" class="input-row" style="flex-wrap:nowrap">
+              <input type="hidden" name="file" value="{{ f.file }}">
+              <input name="email" list="accounts" value="{{ f.email if f.status == 'à valider' else '' }}" placeholder="choisir un compte…" required style="min-width:0">
+              <button class="btn btn-sm {{ 'btn-accent' if f.status == 'à valider' else 'btn-ghost' }}">{{ icon('check', 13) }} Valider</button>
+            </form>
+            {% if f.confidence %}<div class="cell-sub" style="margin-top:4px">proposé avec une fiabilité de {{ f.confidence }} %</div>{% endif %}
+          {% endif %}
+        </td>
+        <td class="cell-sub" style="max-width:300px">{{ f.method or '—' }}
+          {% if f.detail %}<div style="color:var(--warn-text)">{{ f.detail }}</div>{% endif %}</td>
+        <td>{{ status_badge(f.status) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+    <div class="empty">{{ icon('archive', 30) }}<div>Aucun PST analysé : cliquez sur « Analyser le dossier PST ».</div></div>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  let running = {{ 'true' if job.running else 'false' }};
+  async function poll() {
+    try {
+      const j = await (await fetch('/api/inventaire', {cache: 'no-store'})).json();
+      if (!j.running) return location.reload();
+      document.getElementById('job-title').textContent = j.step === 'annuaire' ? "Synchronisation de l'annuaire Zimbra…"
+        : (j.step === 'copie' ? `Copie en cours : ${j.total} PST en attente, analyse automatique dès la fin` : 'Identification des propriétaires…');
+      const bar = document.getElementById('job-bar');
+      bar.classList.toggle('indeterminate', !j.total);
+      bar.firstElementChild.style.width = (j.total ? Math.round(100 * j.done / j.total) : 0) + '%';
+      document.getElementById('job-text').textContent = j.total ? 'Lecture des PST (java-libpst, lecture seule)' : 'SearchDirectoryRequest';
+      document.getElementById('job-count').textContent = j.total ? `${j.done} / ${j.total} PST` : '';
+    } catch (e) { /* nouvelle tentative */ }
+    setTimeout(poll, 1500);
+  }
+  if (running) setTimeout(poll, 800);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page_title = "Lot #" ~ view.id %}
+{% set page_sub = ("Import réel" if view.real else "Simulation — aucune écriture dans Zimbra") ~ (" · mails depuis le " ~ view.since if view.since else "") ~ " · créé le " ~ (view.created | dt) %}
+{% block actions %}
+  <span id="live" class="badge badge-run" {{ 'hidden' if not view.active }}>En direct</span>
+  <form method="post" action="/suivi/{{ view.id }}/arreter" id="f-stop" {{ 'hidden' if not view.active }}>
+    <button class="btn btn-ghost">{{ icon('pause', 15) }} Arrêter</button></form>
+  <form method="post" action="/suivi/{{ view.id }}/reprendre" id="f-resume" {{ 'hidden' if not view.resumable }}>
+    <button class="btn btn-accent">{{ icon('play', 15) }} Reprendre</button></form>
+  <a class="btn btn-ghost" href="/suivi/{{ view.id }}/rapport.csv">{{ icon('download', 15) }} Rapport CSV</a>
+{% endblock %}
+{% block content %}
+{% if error %}<div class="alert alert-ko">{{ icon('alert') }}<div>{{ error }}</div></div>{% endif %}
+
+<section class="card">
+  <div class="overview">
+    <div class="ring">
+      <svg width="128" height="128" viewBox="0 0 128 128">
+        <circle class="track" cx="64" cy="64" r="54" stroke-width="12" fill="none"/>
+        <circle class="bar" id="ring-bar" cx="64" cy="64" r="54" stroke-width="12" fill="none"
+                stroke-dasharray="339.3" stroke-dashoffset="339.3"/>
+      </svg>
+      <div class="label"><b id="ring-pct">0%</b><span>comptes traités</span></div>
+    </div>
+    <div class="overview-stats">
+      <div><div class="stat-label">Statut</div><div class="stat-value" id="o-status" style="font-size:16px;margin-top:4px"></div></div>
+      <div><div class="stat-label">Comptes</div><div class="stat-value" id="o-accounts"></div></div>
+      <div><div class="stat-label">{{ 'Éléments importés' if view.real else 'Éléments à importer' }}</div><div class="stat-value" id="o-items"></div></div>
+      <div><div class="stat-label">Erreurs</div><div class="stat-value" id="o-errors"></div></div>
+      <div><div class="stat-label">Débit</div><div class="stat-value" id="o-rate"></div></div>
+    </div>
+  </div>
+  <div style="margin-top:20px" {{ 'hidden' if not view.real }}>
+    <div class="progress" id="o-bar"><span></span></div>
+    <div class="progress-meta"><span>Progression globale de l'import</span><span id="o-bar-txt"></span></div>
+  </div>
+</section>
+
+<div id="accounts"></div>
+
+{# Icônes réutilisées par le rendu JavaScript #}
+{% for n in ['mail', 'calendar', 'contact', 'task', 'check', 'x', 'pause', 'alert', 'clock', 'gauge', 'key', 'file'] %}
+<template id="ic-{{ n }}">{{ icon(n, 16) }}</template>
+{% endfor %}
+<script id="initial" type="application/json">{{ view | tojson }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const RUN_ID = {{ view.id }};
+  const ic = n => document.getElementById('ic-' + n).innerHTML;
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmt = n => (n ?? 0).toLocaleString('fr-FR');
+  const dur = s => { s = Math.round(s); if (s < 60) return s + ' s'; const m = Math.floor(s / 60);
+                     return m < 60 ? `${m} min ${s % 60} s` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+  const TONE = {ok: 'badge-ok', ko: 'badge-ko', warn: 'badge-warn', run: 'badge-run', idle: ''};
+  const KIND_ICON = {mail: 'mail', appt: 'calendar', contact: 'contact', task: 'task'};
+  const STEP_ICON = {done: 'check', failed: 'x', paused: 'pause'};
+
+  function steps(a) {
+    return `<div class="steps">${a.steps.map((s, i) => `
+      <div class="step ${s.state}"><span class="dot">${STEP_ICON[s.state] ? ic(STEP_ICON[s.state]) : i + 1}</span>
+      <span>${esc(s.label)}${s.state === 'skipped' ? '<br><small>simulation</small>' : ''}</span></div>`).join('')}</div>`;
+  }
+
+  function progress(a, real) {
+    const running = a.status === 'en cours';
+    if (a.phase.startsWith('extraction')) {
+      return `<div class="progress live indeterminate"><span></span></div>
+        <div class="progress-meta"><span>Lecture du PST (java-libpst, lecture seule)</span>
+        <strong>${a.extracted != null ? fmt(a.extracted) + ' éléments lus' : 'démarrage…'}</strong></div>`;
+    }
+    if (!real && a.status !== 'simulation OK') {
+      return running ? `<div class="progress live indeterminate"><span></span></div>
+        <div class="progress-meta"><span>${esc(a.phase || 'préparation')}</span></div>` : '';
+    }
+    if (a.pct == null) return running ? `<div class="progress live indeterminate"><span></span></div>
+        <div class="progress-meta"><span>${esc(a.phase || 'préparation')}</span></div>` : '';
+    const cls = a.tone === 'ko' ? 'ko' : (a.tone === 'ok' ? 'ok' : (running ? 'live' : ''));
+    const right = running && a.total ? `<strong>${fmt(a.done)} / ${fmt(a.total)}</strong>` : `<strong>${a.pct} %</strong>`;
+    const left = running ? `${esc(a.phase)}${a.rate ? ` · ${fmt(Math.round(a.rate))} éléments/min` : ''}${a.eta ? ` · reste ~${dur(a.eta)}` : ''}`
+                         : (real ? 'Import' : 'Analyse');
+    return `<div class="progress ${cls}"><span style="width:${a.pct}%"></span></div>
+      <div class="progress-meta"><span>${left}</span>${right}</div>`;
+  }
+
+  function types(a, real) {
+    return `<div class="types">${a.kinds.map(k => {
+      if (!k.analysed) return `<div class="type absent"><div class="type-head">${ic(KIND_ICON[k.key])} ${esc(k.label)}</div>
+        <div class="type-main">non analysé</div></div>`;
+      if (k.absent) return `<div class="type absent"><div class="type-head">${ic(KIND_ICON[k.key])} ${esc(k.label)}</div>
+        <div class="type-main">absent du PST</div></div>`;
+      const main = real ? k.importes : k.a_importer;
+      const rows = [`${fmt(k.pst)} dans le PST`];
+      if (k.deja) rows.push(`${fmt(k.deja)} déjà importés`);
+      if (k.exclus) rows.push(`${fmt(k.exclus)} exclus (dossiers techniques)`);
+      if (k.hors_periode) rows.push(`${fmt(k.hors_periode)} hors période`);
+      if (k.erreurs) rows.push(`<span class="bad">${fmt(k.erreurs)} en erreur</span>`);
+      if (k.zimbra != null) rows.push(`${fmt(k.zimbra)} dans les dossiers Zimbra`);
+      return `<div class="type"><div class="type-head">${ic(KIND_ICON[k.key])} ${esc(k.label)}</div>
+        <div class="type-main">${fmt(main)} <small>${real ? 'importés' : 'à importer'}</small></div>
+        <div class="type-rows">${rows.map(r => `<span>${r}</span>`).join('')}</div></div>`;
+    }).join('')}</div>`;
+  }
+
+  function account(a, real) {
+    const o = a.others || {};
+    const others = (o.non_pris_en_charge || o.illisibles) ? `<div class="alert alert-warn" style="margin:14px 0 0">${ic('alert')}
+      <div>Non migrés : ${fmt(o.non_pris_en_charge)} élément(s) non pris en charge
+      ${Object.entries(o.classes || {}).map(([c, n]) => `(${esc(c)} : ${n})`).join(' ')}${o.illisibles ? ` · ${fmt(o.illisibles)} illisible(s)` : ''}</div></div>` : '';
+    const match = a.token_account ? (a.token_account.toLowerCase() === a.email ? 'badge-ok' : 'badge-ko') : '';
+    const log = a.log.length ? `<details ${a.status === 'en cours' ? 'open' : ''}><summary>Journal en direct</summary>
+      <div class="logbox">${a.log.map(l => `<div class="${/ ERROR /.test(' ' + l) ? 'err' : (/ WARN /.test(' ' + l) ? 'warn' : '')}">${esc(l)}</div>`).join('')}</div></details>` : '';
+    return `<section class="card account">
+      <div class="account-head">
+        <div class="account-id"><span class="avatar">${esc(a.email[0])}</span>
+          <div><div class="account-email">${esc(a.email)}</div>
+          <div class="cell-sub">${esc(a.phase || '')}</div></div></div>
+        <span class="badge ${TONE[a.tone]}">${esc(a.status)}</span>
+      </div>
+      ${steps(a)}
+      ${progress(a, real)}
+      ${a.error ? `<div class="alert alert-ko" style="margin:14px 0 0">${ic('alert')}<div>${esc(a.error)}</div></div>` : ''}
+      <div class="account-meta">
+        <span>${ic('key')} Compte du jeton : <b class="badge plain ${match}">${esc(a.token_account || '—')}</b></span>
+        <span>${ic('mail')} Expéditeur (Éléments envoyés) : <b>${esc(a.sender_found || '—')}</b></span>
+        <span><a href="/suivi/${RUN_ID}/log/${encodeURIComponent(a.email)}" target="_blank">Journal complet</a></span>
+      </div>
+      ${types(a, real)}
+      ${others}
+      ${log}
+    </section>`;
+  }
+
+  function render(v) {
+    const C = 2 * Math.PI * 54;
+    const bar = document.getElementById('ring-bar');
+    bar.style.strokeDashoffset = C * (1 - v.pct / 100);
+    bar.style.stroke = v.ko ? 'var(--warn)' : (v.pct === 100 ? 'var(--ok)' : 'var(--accent)');
+    document.getElementById('ring-pct').textContent = v.pct + '%';
+    const tone = v.active ? 'badge-run' : (v.status === 'terminé' ? (v.ko ? 'badge-warn' : 'badge-ok') : 'badge-warn');
+    document.getElementById('o-status').innerHTML = `<span class="badge ${tone}">${esc(v.active ? 'en cours' : v.status)}</span>`;
+    document.getElementById('o-accounts').innerHTML = `${v.finished} / ${v.n_accounts} <small class="muted" style="font-size:12px">· ${v.ok} ✓ ${v.ko} ✗</small>`;
+    document.getElementById('o-items').textContent = fmt(v.imported);
+    document.getElementById('o-errors').innerHTML = v.errors ? `<span style="color:var(--ko)">${fmt(v.errors)}</span>` : '0';
+    document.getElementById('o-rate').textContent = v.rate ? fmt(Math.round(v.rate)) + ' /min' : '—';
+    const gp = v.items_total ? Math.round(100 * v.items_done / v.items_total) : (v.pct === 100 ? 100 : 0);
+    const ob = document.getElementById('o-bar');
+    ob.className = 'progress' + (v.active ? ' live' : (gp === 100 ? ' ok' : ''));
+    ob.firstElementChild.style.width = gp + '%';
+    document.getElementById('o-bar-txt').textContent = v.items_total ? `${fmt(v.items_done)} / ${fmt(v.items_total)} éléments` : '';
+    document.getElementById('accounts').innerHTML = v.accounts.map(a => account(a, v.real)).join('');
+    document.getElementById('live').hidden = !v.active;
+    document.getElementById('f-stop').hidden = !v.active;
+    document.getElementById('f-resume').hidden = !v.resumable;
+  }
+
+  let view = JSON.parse(document.getElementById('initial').textContent);
+  render(view);
+  async function poll() {
+    try {
+      const r = await fetch(`/api/lots/${RUN_ID}`, {cache: 'no-store'});
+      if (r.ok) { view = await r.json(); render(view); }
+    } catch (e) { /* réseau momentanément indisponible : on réessaie */ }
+    if (view.active) setTimeout(poll, 1500);
+  }
+  if (view.active) setTimeout(poll, 1500);
+  document.getElementById('f-resume').addEventListener('submit', () => setTimeout(() => location.reload(), 800));
+})();
+</script>
+{% endblock %}

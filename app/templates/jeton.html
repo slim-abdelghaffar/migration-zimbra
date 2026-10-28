@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page_title = "Test jeton délégué" %}
+{% set page_sub = "Vérifie, en lecture seule, qu'un jeton délégué ouvre bien la boîte attendue" %}
+{% block content %}
+<section class="card">
+  <div class="card-head"><div><div class="card-title">{{ icon('key') }} Compte à tester</div>
+    <div class="card-sub">DelegateAuthRequest (admin) puis GetInfoRequest sur <code>{{ settings.user_soap_url }}</code>. Aucun jeton n'est affiché.</div></div></div>
+  <form method="post" class="input-row">
+    <input name="email" value="{{ email }}" placeholder="test.migration@courdescomptes.nat.tn" required>
+    <button type="submit" class="btn btn-accent">{{ icon('play', 15) }} Tester</button>
+  </form>
+</section>
+
+{% if steps %}
+<div class="grid-2">
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('activity') }} Déroulement</div></div>
+    {% with rows = steps %}{% include "_checks.html" %}{% endwith %}
+  </section>
+  {% if result %}
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('contact') }} Compte retourné par GetInfoRequest</div></div>
+    <dl class="kv">
+      <dt>Nom</dt><dd>{{ result.name }}</dd>
+      <dt>Identifiant</dt><dd>{{ result.id }}</dd>
+      <dt>Espace utilisé</dt><dd>{{ (result.used | int) | mo }}</dd>
+      <dt>URL REST</dt><dd>{{ result.rest }}</dd>
+      <dt>Version serveur</dt><dd>{{ result.version }}</dd>
+    </dl>
+  </section>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

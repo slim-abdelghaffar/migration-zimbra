@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% set page_title = "Configuration" %}
+{% set page_sub = "Serveurs, compte d'administration et paramètres d'exécution" %}
+{% block content %}
+{% set f = form if form is defined else settings %}
+{% if saved %}<div class="alert alert-ok">{{ icon('check') }}<div>Configuration enregistrée.</div></div>{% endif %}
+{% for e in errors %}<div class="alert alert-ko">{{ icon('alert') }}<div>{{ e }}</div></div>{% endfor %}
+
+<form method="post" autocomplete="off">
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">{{ icon('server') }} Serveurs Zimbra</div>
+      <div class="card-sub">La vérification TLS n'est jamais désactivée</div></div></div>
+    <div class="form-grid">
+      <label class="field"><span>URL Admin SOAP</span><input name="admin_url" value="{{ f.admin_url }}" required>
+        <span class="help">Port 7071, utilisé pour les jetons (AuthRequest, DelegateAuthRequest)</span></label>
+      <label class="field"><span>URL utilisateur (SOAP / REST)</span><input name="user_url" value="{{ f.user_url }}" required>
+        <span class="help">Proxy 443, utilisé pour l'import dans les boîtes</span></label>
+      <label class="field"><span>Domaine à migrer (optionnel)</span>
+        <input name="domain" value="{{ f.domain }}" placeholder="courdescomptes.nat.tn — vide = tous les domaines">
+        <span class="help">Limite l'annuaire affiché dans le tableau de bord</span></label>
+      <label class="field"><span>Autorité de certification supplémentaire (PEM)</span>
+        <input name="ca_file" value="{{ f.ca_file }}" placeholder="vide = magasin système Ubuntu">
+        <span class="help">Uniquement si le certificat est signé par une AC interne</span></label>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">{{ icon('lock') }} Compte d'administration</div>
+      <div class="card-sub">Le mot de passe reste en mémoire : jamais écrit sur disque, ni dans les journaux.
+        À l'enregistrement, l'annuaire et les PST sont analysés automatiquement.</div></div>
+      <span class="badge {{ 'badge-ok' if password_set else 'badge-warn' }}">{{ 'Mot de passe en mémoire' if password_set else 'Mot de passe non saisi' }}</span>
+    </div>
+    <div class="form-grid">
+      <label class="field"><span>Compte admin</span>
+        <input name="admin_user" value="{{ f.admin_user }}" placeholder="admin@courdescomptes.nat.tn"></label>
+      <label class="field"><span>Mot de passe admin</span>
+        <input type="password" name="admin_password" autocomplete="new-password"
+               placeholder="{{ 'déjà en mémoire — laisser vide pour conserver' if password_set else 'saisir le mot de passe' }}">
+        <span class="help">Perdu au redémarrage du service</span></label>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div class="card-title">{{ icon('cpu') }} Exécution</div></div>
+    <div class="form-grid">
+      <div class="field" style="grid-column:1/-1"><span>Dossier PST</span>
+        <div class="input-row"><input name="pst_dir" id="pst_dir" value="{{ f.pst_dir }}" required>
+          <button type="button" class="btn btn-ghost" id="browse">{{ icon('archive', 15) }} Parcourir…</button></div>
+        <span class="help">Dossier local ou volume partagé avec la VM Windows (sous-dossiers inclus). Les PST sont ouverts en lecture seule.</span></div>
+      <label class="field"><span>Comptes traités en parallèle</span>
+        <input name="parallelism" type="number" min="1" max="5" value="{{ f.parallelism }}">
+        <span class="help">1 à 5 (3 recommandé pour 3 Go de RAM)</span></label>
+      <label class="field"><span>Envois simultanés par compte</span>
+        <input name="connections" type="number" min="1" max="8" value="{{ f.connections }}">
+        <span class="help">1 à 8 (4 recommandé). Les mails partent par lots de 25, plusieurs lots en parallèle</span></label>
+      <label class="field"><span>Fuseau horaire par défaut</span><input name="timezone" value="{{ f.timezone }}" required>
+        <span class="help">Pour les rendez-vous sans fuseau explicite (ex. Africa/Tunis)</span></label>
+    </div>
+  </section>
+
+  <div class="input-row" style="justify-content:flex-end">
+    <button type="submit" class="btn btn-accent btn-lg">{{ icon('check', 16) }} Enregistrer</button>
+  </div>
+</form>
+
+{% if password_set %}
+<form method="post" action="/configuration/oublier" style="margin-top:14px;text-align:right">
+  <button type="submit" class="btn btn-ghost btn-sm">{{ icon('lock', 14) }} Effacer le mot de passe de la mémoire</button>
+</form>
+{% endif %}
+
+<div class="modal" id="picker" hidden>
+  <div class="modal-card">
+    <div class="card-head"><div><div class="card-title">{{ icon('archive') }} Choisir le dossier PST</div>
+      <div class="card-sub" id="pk-path">—</div></div>
+      <button type="button" class="btn btn-ghost btn-sm" id="pk-close">Fermer</button></div>
+    <div class="pk-suggest" id="pk-suggest"></div>
+    <div class="pk-info" id="pk-info"></div>
+    <div class="pk-list" id="pk-list"></div>
+    <div class="input-row" style="justify-content:flex-end;margin-top:14px">
+      <button type="button" class="btn btn-accent" id="pk-choose">{{ icon('check', 15) }} Choisir ce dossier</button></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const mo = n => n >= 1073741824 ? (n / 1073741824).toLocaleString('fr-FR', {maximumFractionDigits: 1}) + ' Go'
+                                  : (n / 1048576).toLocaleString('fr-FR', {maximumFractionDigits: 1}) + ' Mo';
+  let current = null;
+  async function get(url) { const r = await fetch(url, {cache: 'no-store'}); const d = await r.json(); if (!r.ok) throw new Error(d.error); return d; }
+  async function open(path) {
+    try {
+      const d = await get('/api/dossiers?path=' + encodeURIComponent(path));
+      current = d.path; $('pk-path').textContent = d.path;
+      const m = d.mount, notes = [];
+      if (m) notes.push(`<span class="badge badge-brand plain">volume partagé ${esc(m.fstype.toUpperCase())} · ${esc(m.source)}</span>`);
+      notes.push(`<span class="badge ${d.pst ? 'badge-ok' : ''}">${d.pst}${d.complete ? '' : '+'} PST · ${mo(d.size)}</span>`);
+      if (d.writable) notes.push(`<span class="badge badge-warn">accessible en écriture : un montage en lecture seule (ro) est recommandé</span>`);
+      else notes.push(`<span class="badge badge-ok">lecture seule</span>`);
+      $('pk-info').innerHTML = notes.join(' ');
+      $('pk-list').innerHTML = (d.parent ? `<button type="button" class="pk-item" data-p="${esc(d.parent)}">↑ Dossier parent</button>` : '')
+        + d.subdirs.map(s => `<button type="button" class="pk-item" data-p="${esc(d.path.replace(/\/$/, '') + '/' + s)}">${esc(s)}</button>`).join('')
+        + (d.subdirs.length ? '' : '<div class="muted" style="padding:10px">Aucun sous-dossier</div>');
+      document.querySelectorAll('.pk-item').forEach(b => b.onclick = () => open(b.dataset.p));
+    } catch (e) { $('pk-info').innerHTML = `<span class="badge badge-ko">${esc(e.message)}</span>`; }
+  }
+  $('browse').onclick = async () => {
+    $('picker').hidden = false;
+    const s = await get('/api/dossiers');
+    $('pk-suggest').innerHTML = s.suggestions.map(x => `<button type="button" class="chip" data-p="${esc(x.path)}">
+      ${x.shared ? '<b>partagé</b> ' : ''}${esc(x.path)} <span class="muted">${esc(x.label)}</span></button>`).join('');
+    document.querySelectorAll('#pk-suggest .chip').forEach(b => b.onclick = () => open(b.dataset.p));
+    open($('pst_dir').value || '/');
+  };
+  $('pk-close').onclick = () => $('picker').hidden = true;
+  $('pk-choose').onclick = () => { if (current) $('pst_dir').value = current; $('picker').hidden = true; };
+})();
+</script>
+{% endblock %}
