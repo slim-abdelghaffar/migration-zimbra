@@ -130,6 +130,9 @@ NOISE = {"archive", "archives", "archivage", "outlook", "pst", "backup", "sauveg
 GENERIC_STORES = {"outlook data file", "fichier de donnees outlook", "personal folders", "dossiers personnels",
                   "boite aux lettres", "mailbox", "archive"}
 FUZZY_CUTOFF = 0.88
+# Particules de noms (souvent omises dans les noms de PST : « slim.abdelghaffar » pour slim.ben.abdelghaffar)
+PARTICLES = {"ben", "bin", "ibn", "bent", "bint", "el", "al", "bel", "bou", "abou", "abu", "ould", "ait",
+             "de", "di", "da", "du", "del", "della", "des", "van", "von", "le", "la"}
 
 
 def _tokens(s: str) -> list[str]:
@@ -153,15 +156,29 @@ def _joins(tokens: list[str]) -> set[str]:
     return {"".join(p) for p in permutations(tokens)}
 
 
+def _first_last(toks: list[str]) -> list[tuple[str, list[str]]]:
+    """(prénom, mots du nom) selon les deux conventions : prenom.nom et nom.prenom."""
+    if len(toks) < 2:
+        return []
+    return [(toks[0], toks[1:]), (toks[-1], toks[:-1])]
+
+
+def _no_particles(words: list[str]) -> list[str]:
+    kept = [w for w in words if w not in PARTICLES]
+    return kept if kept and kept != words else []
+
+
 class NameMatcher:
     """Rapproche un nom de fichier / dossier d'un compte de l'annuaire.
 
     Niveaux (fiabilité) : nom complet dans n'importe quel ordre (85), identifiant Windows/AD (85),
-    initiale + nom (70), nom approchant / faute de frappe (65), nom de famille seul s'il est unique (60).
+    nom complet sans particule ben / el / bou… (80), initiale + nom (70), nom approchant / faute de
+    frappe (65), nom de famille seul s'il est unique (60).
     """
 
     def __init__(self, dir_: dict):
         self.full: dict[str, set[str]] = {}
+        self.full_np: dict[str, set[str]] = {}  # sans particule
         self.login: dict[str, set[str]] = {}
         self.initials: dict[str, set[str]] = {}
         self.last: dict[str, set[str]] = {}
@@ -172,12 +189,16 @@ class NameMatcher:
                     continue
                 for j in _joins(toks):
                     self.full.setdefault(j, set()).add(email)
-                if len(toks) >= 2:
-                    # convention prenom.nom et nom.prenom : initiale + nom, nom seul
-                    for first, last in ((toks[0], "".join(toks[1:])), (toks[-1], "".join(toks[:-1]))):
+                for first, words in _first_last(toks):
+                    np = _no_particles(words)
+                    if np:
+                        for j in _joins([first] + np):
+                            self.full_np.setdefault(j, set()).add(email)
+                    # initiale + nom et nom seul, avec et sans particule
+                    for last in {"".join(words), "".join(np)} - {""}:
                         for k in (first[0] + last, last + first[0]):
                             self.initials.setdefault(k, set()).add(email)
-                        if len(last) >= 5:
+                        if len(last) >= 4:
                             self.last.setdefault(last, set()).add(email)
             login = "".join(_tokens(acc.get("login") or ""))
             if len(login) >= 4:
@@ -190,6 +211,7 @@ class NameMatcher:
             return []
         joins = _joins(toks)
         for table, conf, how in ((self.full, 85, "nom complet"), (self.login, 85, "identifiant Windows/AD"),
+                                 (self.full_np, 80, "nom complet sans particule"),
                                  (self.initials, 70, "initiale + nom"), (self.last, 60, "nom de famille")):
             found = set().union(*(table.get(j, set()) for j in joins))
             if found:
